@@ -329,10 +329,15 @@ int CheckEntrySignal()
    if(CopyBuffer(hEMA_Slow_HTF, 0, 0, 3, emaSlowHTF) < 3) return SIGNAL_NONE;
    if(CopyBuffer(hEMA_Entry,    0, 0, 3, emaEntry)   < 3) return SIGNAL_NONE;
    if(CopyBuffer(hRSI,          0, 0, 3, rsi)        < 3) return SIGNAL_NONE;
-   if(CopyBuffer(hMACD,         0, 0, 3, macdMain)   < 3) return SIGNAL_NONE;
-   if(CopyBuffer(hMACD,         1, 0, 3, macdSignal) < 3) return SIGNAL_NONE;
-   if(CopyBuffer(hMACD,         2, 0, 3, macdHist)   < 3) return SIGNAL_NONE;  // Histogram buffer
+   if(CopyBuffer(hMACD,         0, 0, 3, macdMain)   < 3) return SIGNAL_NONE;   // MACD main line
+   if(CopyBuffer(hMACD,         1, 0, 3, macdSignal) < 3) return SIGNAL_NONE;   // MACD signal line
    if(CopyBuffer(hATR,          0, 0, 3, atr)        < 3) return SIGNAL_NONE;
+
+   //--- Calculate MACD histogram manually (iMACD only has 2 buffers: main + signal)
+   ArrayResize(macdHist, 3);
+   ArraySetAsSeries(macdHist, true);
+   for(int k = 0; k < 3; k++)
+      macdHist[k] = macdMain[k] - macdSignal[k];
 
    //--- Store for dashboard use
    g_PrevRSI  = rsi[1];
@@ -820,13 +825,13 @@ void CreateDashboardObjects()
    ObjectCreate(0, bg, OBJ_RECTANGLE_LABEL, 0, 0, 0);
    ObjectSetInteger(0, bg, OBJPROP_XDISTANCE,   DashboardX);
    ObjectSetInteger(0, bg, OBJPROP_YDISTANCE,   DashboardY);
-   ObjectSetInteger(0, bg, OBJPROP_XSIZE,        360);
-   ObjectSetInteger(0, bg, OBJPROP_YSIZE,        530);
+   ObjectSetInteger(0, bg, OBJPROP_XSIZE,        370);
+   ObjectSetInteger(0, bg, OBJPROP_YSIZE,        560);
    ObjectSetInteger(0, bg, OBJPROP_BGCOLOR,      DashboardBGColor);
    ObjectSetInteger(0, bg, OBJPROP_BORDER_TYPE,  BORDER_FLAT);
    ObjectSetInteger(0, bg, OBJPROP_COLOR,        clrDimGray);
    ObjectSetInteger(0, bg, OBJPROP_WIDTH,        1);
-   ObjectSetInteger(0, bg, OBJPROP_BACK,         true);
+   ObjectSetInteger(0, bg, OBJPROP_BACK,         false);  // Draw in FOREGROUND so panel covers chart candles
    ObjectSetInteger(0, bg, OBJPROP_SELECTABLE,   false);
    ObjectSetInteger(0, bg, OBJPROP_HIDDEN,       true);
 
@@ -871,10 +876,10 @@ void CreateDashboardObjects()
       string name = g_DashPrefix + labels[i];
       ObjectCreate(0, name, OBJ_LABEL, 0, 0, 0);
       ObjectSetInteger(0, name, OBJPROP_XDISTANCE, DashboardX + 10);
-      ObjectSetInteger(0, name, OBJPROP_YDISTANCE, DashboardY + 10 + i * 17);
+      ObjectSetInteger(0, name, OBJPROP_YDISTANCE, DashboardY + 12 + i * 18);
       ObjectSetInteger(0, name, OBJPROP_COLOR,     clrWhite);
       ObjectSetString(0,  name, OBJPROP_FONT,      "Courier New");
-      ObjectSetInteger(0, name, OBJPROP_FONTSIZE,  8);
+      ObjectSetInteger(0, name, OBJPROP_FONTSIZE,  9);
       ObjectSetInteger(0, name, OBJPROP_SELECTABLE,false);
       ObjectSetInteger(0, name, OBJPROP_HIDDEN,    true);
       ObjectSetInteger(0, name, OBJPROP_CORNER,    CORNER_LEFT_UPPER);
@@ -1004,15 +1009,17 @@ void UpdateDashboard()
    else if(rsiVal > 65)  rsiClr = clrRed;          // Overbought
    SetDashLabel("RSI", StringFormat("  RSI(14): %.1f", rsiVal), rsiClr);
 
-   //--- MACD
-   double macdHistBuf[];
-   ArraySetAsSeries(macdHistBuf, true);
+   //--- MACD (histogram = main line - signal line; iMACD only has 2 buffers)
+   double macdMainBuf[], macdSigBuf[];
+   ArraySetAsSeries(macdMainBuf, true);
+   ArraySetAsSeries(macdSigBuf,  true);
    double macdHistVal = 0.0;
    string macdText = "N/A";
    color  macdClr  = clrWhite;
-   if(CopyBuffer(hMACD, 2, 0, 2, macdHistBuf) >= 2)
+   if(CopyBuffer(hMACD, 0, 0, 2, macdMainBuf) >= 2 &&
+      CopyBuffer(hMACD, 1, 0, 2, macdSigBuf)  >= 2)
    {
-      macdHistVal = macdHistBuf[1];
+      macdHistVal = macdMainBuf[1] - macdSigBuf[1];
       if(macdHistVal > 0) { macdText = "BULLISH"; macdClr = clrLimeGreen; }
       else                 { macdText = "BEARISH"; macdClr = clrRed; }
    }
