@@ -36,6 +36,7 @@ input int             MACD_Slow        = 26;           // MACD slow EMA
 input int             MACD_Signal      = 9;            // MACD signal line
 input int             ATR_Period       = 14;           // ATR period
 input double          ATR_MinThreshold = 0.5;          // Min ATR in $ (avoid low-vol chop)
+input double          EMABounceTolerance = 0.001;      // EMA bounce tolerance (0.1% default)
 
 //--- Risk Management
 input group "=== Risk Management ==="
@@ -133,6 +134,25 @@ double   g_PrevMACD = 0.0;
 //--- Track previous close for EMA proximity check
 double   g_PrevClose = 0.0;
 
+//--- ATR volatility classification thresholds (multiples of ATR_MinThreshold)
+#define ATR_LOW_VOL_RATIO  1.5    // Below this multiple = LOW VOL
+#define ATR_HIGH_VOL_RATIO 4.0    // Above this multiple = HIGH VOL
+
+//+------------------------------------------------------------------+
+//| DETECT BROKER-SUPPORTED ORDER FILLING MODE                        |
+//+------------------------------------------------------------------+
+ENUM_ORDER_TYPE_FILLING GetBrokerFillingMode()
+{
+   uint filling = (uint)SymbolInfoInteger(_Symbol, SYMBOL_FILLING_MODE);
+
+   if((filling & SYMBOL_FILLING_FOK) != 0)
+      return ORDER_FILLING_FOK;
+   if((filling & SYMBOL_FILLING_IOC) != 0)
+      return ORDER_FILLING_IOC;
+
+   return ORDER_FILLING_RETURN;
+}
+
 //+------------------------------------------------------------------+
 //| INITIALIZATION                                                     |
 //+------------------------------------------------------------------+
@@ -141,7 +161,10 @@ int OnInit()
    //--- Set trade magic number
    Trade.SetExpertMagicNumber(MagicNumber);
    Trade.SetDeviationInPoints(10);
-   Trade.SetTypeFilling(ORDER_FILLING_IOC);
+
+   //--- Detect broker-supported order filling policy and apply it
+   ENUM_ORDER_TYPE_FILLING fillingMode = GetBrokerFillingMode();
+   Trade.SetTypeFilling(fillingMode);
 
    //--- Create indicator handles
    hEMA_Fast_HTF = iMA(_Symbol, TrendTimeframe, EMA_Fast,  0, MODE_EMA, PRICE_CLOSE);
@@ -343,7 +366,7 @@ int CheckEntrySignal()
    {
       //--- [FILTER 3B] Price pulls back to 21 EMA and bounces
       //    Last closed candle: close was near or below 21 EMA, now bouncing above
-      bool emaBounce = (closePrev <= entryEMA * 1.001) && (closeNow > entryEMA);
+      bool emaBounce = (closePrev <= entryEMA * (1.0 + EMABounceTolerance)) && (closeNow > entryEMA);
 
       //--- [FILTER 4B] RSI(14) crosses above 40 from below (early momentum catch)
       bool rsiCross = (rsiPrev < 40.0) && (rsiNow >= 40.0);
@@ -359,7 +382,7 @@ int CheckEntrySignal()
    if(bearishHTF)
    {
       //--- [FILTER 3S] Price pulls back to 21 EMA from above and bounces down
-      bool emaBounce = (closePrev >= entryEMA * 0.999) && (closeNow < entryEMA);
+      bool emaBounce = (closePrev >= entryEMA * (1.0 - EMABounceTolerance)) && (closeNow < entryEMA);
 
       //--- [FILTER 4S] RSI(14) crosses below 60 from above
       bool rsiCross = (rsiPrev > 60.0) && (rsiNow <= 60.0);
@@ -372,6 +395,21 @@ int CheckEntrySignal()
    }
 
    return SIGNAL_NONE;
+}
+
+//+------------------------------------------------------------------+
+//| NORMALIZE LOT SIZE to broker constraints                          |
+//+------------------------------------------------------------------+
+double NormalizeLots(double lots)
+{
+   double minLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double maxLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+   double lotStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+
+   lots = MathFloor(lots / lotStep) * lotStep;
+   lots = MathMax(lots, minLot);
+   lots = MathMin(lots, maxLot);
+   return lots;
 }
 
 //+------------------------------------------------------------------+
@@ -391,16 +429,7 @@ double CalculateLotSize(double slDistance)
 
    double lots = riskAmount / (slDistance / _Point * pointValue);
 
-   //--- Clamp to broker min/max lot
-   double minLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-   double maxLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
-   double lotStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
-
-   lots = MathFloor(lots / lotStep) * lotStep;
-   lots = MathMax(lots, minLot);
-   lots = MathMin(lots, maxLot);
-
-   return lots;
+   return NormalizeLots(lots);
 }
 
 //+------------------------------------------------------------------+
@@ -500,11 +529,8 @@ void ManageOpenTrades()
       //--- === PARTIAL CLOSE at 1:1 RR ===
       if(!g_OpenTrades[i].partialClosed && profit >= slDistance)
       {
-         double closeLots = NormalizeDouble(lots * (PartialClosePercent / 100.0),
-                                            (int)MathCeil(-MathLog10(SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP))));
-         double minLot   = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-         double lotStep  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
-         closeLots = MathFloor(closeLots / lotStep) * lotStep;
+         double closeLots = NormalizeLots(lots * (PartialClosePercent / 100.0));
+         double minLot    = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
 
          if(closeLots >= minLot && closeLots < lots)
          {
@@ -953,9 +979,9 @@ void UpdateDashboard()
    if(CopyBuffer(hATR, 0, 0, 2, atrBuf) >= 2)
    {
       atrVal = atrBuf[1];
-      if(atrVal < ATR_MinThreshold * 1.5)      { atrLabel = "LOW VOL";    atrClr = clrYellow; }
-      else if(atrVal > ATR_MinThreshold * 4.0) { atrLabel = "HIGH VOL";   atrClr = clrOrangeRed; }
-      else                                      { atrLabel = "NORMAL";     atrClr = clrLimeGreen; }
+      if(atrVal < ATR_MinThreshold * ATR_LOW_VOL_RATIO)       { atrLabel = "LOW VOL";    atrClr = clrYellow; }
+      else if(atrVal > ATR_MinThreshold * ATR_HIGH_VOL_RATIO) { atrLabel = "HIGH VOL";   atrClr = clrOrangeRed; }
+      else                                                      { atrLabel = "NORMAL";     atrClr = clrLimeGreen; }
    }
    SetDashLabel("ATR", StringFormat("  ATR(14): %.4f  [%s]", atrVal, atrLabel), atrClr);
 
