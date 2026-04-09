@@ -64,6 +64,10 @@ input int             DashboardY           = 30;       // Dashboard Y position
 input color           DashboardBGColor     = clrBlack; // Dashboard background color
 input int             DashboardTransparency = 180;     // Background transparency (0-255)
 
+//--- Debug
+input group "=== Debug ==="
+input bool            DebugLogging         = false;    // Print filter debug info to Experts tab
+
 //+------------------------------------------------------------------+
 //| GLOBAL VARIABLES                                                   |
 //+------------------------------------------------------------------+
@@ -379,8 +383,8 @@ int CheckEntrySignal()
       //--- [FILTER 5B] MACD histogram positive (momentum aligned with bullish trend)
       bool macdBull = (histNow > 0.0);
 
-      //--- Debug logging
-      if(!nearEMA || !rsiFavorable || !macdBull)
+      //--- Debug logging (controlled by DebugLogging input)
+      if(DebugLogging && (!nearEMA || !rsiFavorable || !macdBull))
          Print("GoldMasterEA BUY filters: EMA=", nearEMA, " (close=", closeNow, " ema=", entryEMA, " dist=", MathAbs(closeNow - entryEMA),
                ") RSI=", rsiFavorable, " (", rsiNow, ") MACD=", macdBull, " (hist=", histNow, ")");
 
@@ -400,8 +404,8 @@ int CheckEntrySignal()
       //--- [FILTER 5S] MACD histogram negative (momentum aligned with bearish trend)
       bool macdBear = (histNow < 0.0);
 
-      //--- Debug logging
-      if(!nearEMA || !rsiFavorable || !macdBear)
+      //--- Debug logging (controlled by DebugLogging input)
+      if(DebugLogging && (!nearEMA || !rsiFavorable || !macdBear))
          Print("GoldMasterEA SELL filters: EMA=", nearEMA, " (close=", closeNow, " ema=", entryEMA, " dist=", MathAbs(closeNow - entryEMA),
                ") RSI=", rsiFavorable, " (", rsiNow, ") MACD=", macdBear, " (hist=", histNow, ")");
 
