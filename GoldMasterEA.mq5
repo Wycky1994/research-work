@@ -36,7 +36,7 @@ input int             MACD_Slow        = 26;           // MACD slow EMA
 input int             MACD_Signal      = 9;            // MACD signal line
 input int             ATR_Period       = 14;           // ATR period
 input double          ATR_MinThreshold = 0.5;          // Min ATR in $ (avoid low-vol chop)
-input double          EMABounceTolerance = 0.001;      // EMA bounce tolerance (0.1% default)
+input double          EMABounceTolerance = 0.005;      // EMA proximity tolerance (0.5% default)
 
 //--- Risk Management
 input group "=== Risk Management ==="
@@ -369,33 +369,43 @@ int CheckEntrySignal()
    //--- ===== BUY SIGNAL =====
    if(bullishHTF)
    {
-      //--- [FILTER 3B] Price pulls back to 21 EMA and bounces
-      //    Last closed candle: close was near or below 21 EMA, now bouncing above
-      bool emaBounce = (closePrev <= entryEMA * (1.0 + EMABounceTolerance)) && (closeNow > entryEMA);
+      //--- [FILTER 3B] Price is near the 21 EMA (pullback proximity zone)
+      //    Ensures we enter on pullbacks to the EMA, not at extreme distance
+      bool nearEMA = MathAbs(closeNow - entryEMA) <= entryEMA * EMABounceTolerance;
 
-      //--- [FILTER 4B] RSI(14) crosses above 40 from below (early momentum catch)
-      bool rsiCross = (rsiPrev < 40.0) && (rsiNow >= 40.0);
+      //--- [FILTER 4B] RSI(14) in favorable zone (oversold → neutral, not overbought)
+      bool rsiFavorable = (rsiNow >= 30.0 && rsiNow <= 55.0);
 
-      //--- [FILTER 5B] MACD histogram turns positive (momentum confirmation)
-      bool macdBull = (histPrev <= 0.0) && (histNow > 0.0);
+      //--- [FILTER 5B] MACD histogram positive (momentum aligned with bullish trend)
+      bool macdBull = (histNow > 0.0);
 
-      if(emaBounce && rsiCross && macdBull)
+      //--- Debug logging
+      if(!nearEMA || !rsiFavorable || !macdBull)
+         Print("GoldMasterEA BUY filters: EMA=", nearEMA, " (close=", closeNow, " ema=", entryEMA, " dist=", MathAbs(closeNow - entryEMA),
+               ") RSI=", rsiFavorable, " (", rsiNow, ") MACD=", macdBull, " (hist=", histNow, ")");
+
+      if(nearEMA && rsiFavorable && macdBull)
          return SIGNAL_BUY;
    }
 
    //--- ===== SELL SIGNAL =====
    if(bearishHTF)
    {
-      //--- [FILTER 3S] Price pulls back to 21 EMA from above and bounces down
-      bool emaBounce = (closePrev >= entryEMA * (1.0 - EMABounceTolerance)) && (closeNow < entryEMA);
+      //--- [FILTER 3S] Price is near the 21 EMA (pullback proximity zone)
+      bool nearEMA = MathAbs(closeNow - entryEMA) <= entryEMA * EMABounceTolerance;
 
-      //--- [FILTER 4S] RSI(14) crosses below 60 from above
-      bool rsiCross = (rsiPrev > 60.0) && (rsiNow <= 60.0);
+      //--- [FILTER 4S] RSI(14) in favorable zone (overbought → neutral, not oversold)
+      bool rsiFavorable = (rsiNow >= 45.0 && rsiNow <= 70.0);
 
-      //--- [FILTER 5S] MACD histogram turns negative
-      bool macdBear = (histPrev >= 0.0) && (histNow < 0.0);
+      //--- [FILTER 5S] MACD histogram negative (momentum aligned with bearish trend)
+      bool macdBear = (histNow < 0.0);
 
-      if(emaBounce && rsiCross && macdBear)
+      //--- Debug logging
+      if(!nearEMA || !rsiFavorable || !macdBear)
+         Print("GoldMasterEA SELL filters: EMA=", nearEMA, " (close=", closeNow, " ema=", entryEMA, " dist=", MathAbs(closeNow - entryEMA),
+               ") RSI=", rsiFavorable, " (", rsiNow, ") MACD=", macdBear, " (hist=", histNow, ")");
+
+      if(nearEMA && rsiFavorable && macdBear)
          return SIGNAL_SELL;
    }
 
