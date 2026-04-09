@@ -379,7 +379,7 @@ int CheckEntrySignal()
    if(bullishHTF)
    {
       //--- [FILTER 3B] Bounce candle off 21 EMA:
-      //    Candle's low reached near the EMA (wick touched it) AND candle closed above EMA (bullish bounce)
+      //    Candle's low reached near the EMA (wick touched it) AND candle closed above EMA AND candle is bullish (close > open)
       bool emaBounce = (lowNow <= entryEMA + emaTolerance) && (closeNow > entryEMA) && (closeNow > openNow);
 
       //--- [FILTER 4B] RSI momentum confirmation:
@@ -404,7 +404,7 @@ int CheckEntrySignal()
    if(bearishHTF)
    {
       //--- [FILTER 3S] Bounce candle off 21 EMA:
-      //    Candle's high reached near the EMA (wick touched it) AND candle closed below EMA (bearish bounce)
+      //    Candle's high reached near the EMA (wick touched it) AND candle closed below EMA AND candle is bearish (close < open)
       bool emaBounce = (highNow >= entryEMA - emaTolerance) && (closeNow < entryEMA) && (closeNow < openNow);
 
       //--- [FILTER 4S] RSI momentum confirmation:
@@ -1088,7 +1088,10 @@ void UpdateDashboard()
          SetDashLabel("TrdTrail",   StringFormat("  Trail  : %s", trailText), clrWhite);
 
          string partialText = g_OpenTrades[0].partialClosed ? "Executed" :
-                              StringFormat("Pending at %.5f", ep + (ep - posSL));
+                              StringFormat("Pending at %.5f",
+                                 (g_OpenTrades[0].direction == SIGNAL_BUY)
+                                    ? ep + MathAbs(ep - posSL)   // 1:1 above entry for buys
+                                    : ep - MathAbs(posSL - ep)); // 1:1 below entry for sells
          SetDashLabel("TrdPartial", StringFormat("  Partial: %s", partialText), clrWhite);
       }
    }
