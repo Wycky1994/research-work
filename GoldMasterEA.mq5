@@ -43,7 +43,7 @@ input group "=== Risk Management ==="
 input double          RiskPercent           = 1.0;     // Risk per trade (% of balance)
 input double          ATRMultiplierSL       = 1.5;     // ATR multiplier for stop loss
 input double          RewardRiskRatio       = 2.0;     // Reward:Risk ratio for take profit
-input double          TrailingATRMultiplier = 1.0;     // ATR multiplier for trailing stop
+input double          TrailingATRMultiplier = 1.5;     // ATR multiplier for trailing stop
 input double          BreakEvenPips         = 50;      // Break-even offset in points
 input double          PartialClosePercent   = 50.0;    // % to close at 1:1 RR
 input int             MaxOpenTrades         = 2;       // Max simultaneous open trades
@@ -358,9 +358,11 @@ int CheckEntrySignal()
    double histPrev = macdHist[2];
    double atrNow   = atr[1];
 
-   //--- Current close price of last closed candle
+   //--- Candle data for bounce confirmation
    double closeNow  = iClose(_Symbol, EntryTimeframe, 1);
-   double closePrev = iClose(_Symbol, EntryTimeframe, 2);
+   double openNow   = iOpen(_Symbol, EntryTimeframe, 1);
+   double lowNow    = iLow(_Symbol, EntryTimeframe, 1);
+   double highNow   = iHigh(_Symbol, EntryTimeframe, 1);
 
    //--- [FILTER 1] ATR minimum threshold — avoid low-volatility chop
    if(atrNow < ATR_MinThreshold)
@@ -370,46 +372,56 @@ int CheckEntrySignal()
    bool bullishHTF = (fastHTF > slowHTF);   // 50 EMA above 200 EMA = bullish trend
    bool bearishHTF = (fastHTF < slowHTF);   // 50 EMA below 200 EMA = bearish trend
 
+   //--- EMA tolerance band (used for bounce detection)
+   double emaTolerance = entryEMA * EMABounceTolerance;
+
    //--- ===== BUY SIGNAL =====
    if(bullishHTF)
    {
-      //--- [FILTER 3B] Price is near the 21 EMA (pullback proximity zone)
-      //    Ensures we enter on pullbacks to the EMA, not at extreme distance
-      bool nearEMA = MathAbs(closeNow - entryEMA) <= entryEMA * EMABounceTolerance;
+      //--- [FILTER 3B] Bounce candle off 21 EMA:
+      //    Candle's low reached near the EMA (wick touched it) AND candle closed above EMA (bullish bounce)
+      bool emaBounce = (lowNow <= entryEMA + emaTolerance) && (closeNow > entryEMA) && (closeNow > openNow);
 
-      //--- [FILTER 4B] RSI(14) in favorable zone (oversold → neutral, not overbought)
-      bool rsiFavorable = (rsiNow >= 30.0 && rsiNow <= 55.0);
+      //--- [FILTER 4B] RSI momentum confirmation:
+      //    RSI is rising AND in non-overbought zone (confirming bounce momentum)
+      bool rsiConfirm = (rsiNow > rsiPrev) && (rsiNow >= 40.0) && (rsiNow <= 65.0);
 
-      //--- [FILTER 5B] MACD histogram positive (momentum aligned with bullish trend)
-      bool macdBull = (histNow > 0.0);
+      //--- [FILTER 5B] MACD histogram rising (momentum shifting up)
+      bool macdConfirm = (histNow > histPrev);
 
       //--- Debug logging (controlled by DebugLogging input)
-      if(DebugLogging && (!nearEMA || !rsiFavorable || !macdBull))
-         Print("GoldMasterEA BUY filters: EMA=", nearEMA, " (close=", closeNow, " ema=", entryEMA, " dist=", MathAbs(closeNow - entryEMA),
-               ") RSI=", rsiFavorable, " (", rsiNow, ") MACD=", macdBull, " (hist=", histNow, ")");
+      if(DebugLogging)
+         Print("GoldMasterEA BUY filters: Bounce=", emaBounce,
+               " (low=", lowNow, " ema=", entryEMA, " close=", closeNow, " open=", openNow,
+               ") RSI=", rsiConfirm, " (now=", rsiNow, " prev=", rsiPrev,
+               ") MACD=", macdConfirm, " (hist=", histNow, " prev=", histPrev, ")");
 
-      if(nearEMA && rsiFavorable && macdBull)
+      if(emaBounce && rsiConfirm && macdConfirm)
          return SIGNAL_BUY;
    }
 
    //--- ===== SELL SIGNAL =====
    if(bearishHTF)
    {
-      //--- [FILTER 3S] Price is near the 21 EMA (pullback proximity zone)
-      bool nearEMA = MathAbs(closeNow - entryEMA) <= entryEMA * EMABounceTolerance;
+      //--- [FILTER 3S] Bounce candle off 21 EMA:
+      //    Candle's high reached near the EMA (wick touched it) AND candle closed below EMA (bearish bounce)
+      bool emaBounce = (highNow >= entryEMA - emaTolerance) && (closeNow < entryEMA) && (closeNow < openNow);
 
-      //--- [FILTER 4S] RSI(14) in favorable zone (overbought → neutral, not oversold)
-      bool rsiFavorable = (rsiNow >= 45.0 && rsiNow <= 70.0);
+      //--- [FILTER 4S] RSI momentum confirmation:
+      //    RSI is falling AND in non-oversold zone (confirming selloff momentum)
+      bool rsiConfirm = (rsiNow < rsiPrev) && (rsiNow >= 35.0) && (rsiNow <= 60.0);
 
-      //--- [FILTER 5S] MACD histogram negative (momentum aligned with bearish trend)
-      bool macdBear = (histNow < 0.0);
+      //--- [FILTER 5S] MACD histogram falling (momentum shifting down)
+      bool macdConfirm = (histNow < histPrev);
 
       //--- Debug logging (controlled by DebugLogging input)
-      if(DebugLogging && (!nearEMA || !rsiFavorable || !macdBear))
-         Print("GoldMasterEA SELL filters: EMA=", nearEMA, " (close=", closeNow, " ema=", entryEMA, " dist=", MathAbs(closeNow - entryEMA),
-               ") RSI=", rsiFavorable, " (", rsiNow, ") MACD=", macdBear, " (hist=", histNow, ")");
+      if(DebugLogging)
+         Print("GoldMasterEA SELL filters: Bounce=", emaBounce,
+               " (high=", highNow, " ema=", entryEMA, " close=", closeNow, " open=", openNow,
+               ") RSI=", rsiConfirm, " (now=", rsiNow, " prev=", rsiPrev,
+               ") MACD=", macdConfirm, " (hist=", histNow, " prev=", histPrev, ")");
 
-      if(nearEMA && rsiFavorable && macdBear)
+      if(emaBounce && rsiConfirm && macdConfirm)
          return SIGNAL_SELL;
    }
 
@@ -709,24 +721,40 @@ int CountOpenTrades()
 //+------------------------------------------------------------------+
 void SyncOpenTrades()
 {
-   //--- Build fresh list of open positions for our EA
+   //--- Save previous trade records so we can preserve state (partial close, BE, trailing)
+   TradeRecord prevTrades[10];
+   int prevCount = g_OpenTradesCount;
+   for(int i = 0; i < prevCount; i++)
+      prevTrades[i] = g_OpenTrades[i];
+
+   //--- Rebuild list from broker positions
    g_OpenTradesCount = 0;
    for(int i = PositionsTotal() - 1; i >= 0; i--)
    {
       ulong ticket = PositionGetTicket(i);
       if(PositionGetString(POSITION_SYMBOL) != _Symbol) continue;
       if(PositionGetInteger(POSITION_MAGIC)  != MagicNumber) continue;
+      if(g_OpenTradesCount >= 10) break;
 
-      //--- Try to find existing record to preserve state (partial close, break-even, etc.)
-      bool found = false;
-      for(int j = 0; j < g_OpenTradesCount; j++)
+      //--- Check if this trade was previously tracked (preserve management state)
+      int prevIdx = -1;
+      for(int j = 0; j < prevCount; j++)
       {
-         if(g_OpenTrades[j].ticket == ticket) { found = true; break; }
+         if(prevTrades[j].ticket == ticket) { prevIdx = j; break; }
       }
 
-      if(!found && g_OpenTradesCount < 10)
+      int idx = g_OpenTradesCount;
+      if(prevIdx >= 0)
       {
-         int idx = g_OpenTradesCount;
+         //--- Existing trade: preserve all state, update dynamic fields from broker
+         g_OpenTrades[idx] = prevTrades[prevIdx];
+         g_OpenTrades[idx].sl   = PositionGetDouble(POSITION_SL);
+         g_OpenTrades[idx].tp   = PositionGetDouble(POSITION_TP);
+         g_OpenTrades[idx].lots = PositionGetDouble(POSITION_VOLUME);
+      }
+      else
+      {
+         //--- New trade: initialize fresh record
          g_OpenTrades[idx].ticket         = ticket;
          g_OpenTrades[idx].entryPrice     = PositionGetDouble(POSITION_PRICE_OPEN);
          g_OpenTrades[idx].sl             = PositionGetDouble(POSITION_SL);
@@ -739,24 +767,9 @@ void SyncOpenTrades()
          g_OpenTrades[idx].trailingActive = false;
          g_OpenTrades[idx].trailingLevel  = 0.0;
          g_OpenTrades[idx].openTime       = (datetime)PositionGetInteger(POSITION_TIME);
-         g_OpenTradesCount++;
       }
+      g_OpenTradesCount++;
    }
-
-   //--- Remove closed trades from our tracking array
-   int newCount = 0;
-   TradeRecord temp[10];
-   for(int i = 0; i < g_OpenTradesCount; i++)
-   {
-      if(PositionSelectByTicket(g_OpenTrades[i].ticket))
-      {
-         temp[newCount] = g_OpenTrades[i];
-         newCount++;
-      }
-   }
-   g_OpenTradesCount = newCount;
-   for(int i = 0; i < newCount; i++)
-      g_OpenTrades[i] = temp[i];
 }
 
 //+------------------------------------------------------------------+
